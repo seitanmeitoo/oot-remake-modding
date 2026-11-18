@@ -1,17 +1,22 @@
 # Cinema's manifest: a core mod (no patches of its own; it runs on KaeGae Core 0.8 and up).
+# GPL-3.0 (LICENSE here), because its warps come from sloperinaGZ (PracticeROM), which is.
 manifest = 1
 
 id       = "seitanmeitoo.cinema"
 name     = "Cinema"
-version  = "0.1.0"
-authors  = ["seitanmeitoo"]
-license  = "MIT"
+version  = "0.5.0"
+authors  = ["seitanmeitoo", "PracticeROM and sloperinaGZ's contributors (warps)"]
+license  = "GPL-3.0-or-later"
 homepage = "https://github.com/seitanmeitoo/oot-remake-modding"
+ship     = ["LICENSE", "SOURCE.txt"]   # in the zip: GPL-3.0 and where the source is
 
 [game]
 title = "0400486024DEC000"
 
 [core]
 api     = "0.8"
-sources = ["cinema.c"]
-events  = ["frame", "draw"]
+sources = ["cinema.c", "panel.c", "warp.c", "places.c", "gamedata.c", "link.c"]
+events  = ["frame", "input", "view", "draw", "player_move"]
+
+[core.imports]                # system functions the mod imports itself, and which module exports them
+_ZN2nn3hid14GetMouseStatesEPNS0_10MouseStateEi = "sdk"   # the panel's mouse (panel.c)
