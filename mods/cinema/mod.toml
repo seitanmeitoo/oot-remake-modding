@@ -1,0 +1,17 @@
+# Cinema's manifest: a core mod (no patches of its own; it runs on KaeGae Core 0.8 and up).
+manifest = 1
+
+id       = "seitanmeitoo.cinema"
+name     = "Cinema"
+version  = "0.1.0"
+authors  = ["seitanmeitoo"]
+license  = "MIT"
+homepage = "https://github.com/seitanmeitoo/oot-remake-modding"
+
+[game]
+title = "0400486024DEC000"
+
+[core]
+api     = "0.8"
+sources = ["cinema.c"]
+events  = ["frame", "draw"]
