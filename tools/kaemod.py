@@ -18,6 +18,7 @@ The zip holds one mod folder for an emulator's load folder: the modules, Core's 
 """
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -102,7 +103,9 @@ def hook_builds():
 
 
 def run(*cmd):
-    subprocess.run([str(c) for c in cmd], check=True)
+    # On Windows "ld.lld" already has an extension, so CreateProcess won't add ".exe": look it up.
+    exe = shutil.which(str(cmd[0])) or str(cmd[0])
+    subprocess.run([exe, *(str(c) for c in cmd[1:])], check=True)
 
 
 def compile_sources(sources, work, flags=()):
