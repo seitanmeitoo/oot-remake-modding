@@ -1,0 +1,56 @@
+# Publishes Cinema: on a tag "cinema-v<version>", builds Cinema, packs it with KaeGae Core
+# (releases/kaegae-core.zip) into cinema-pack.zip, and makes a GitHub Release with that zip and the
+# installer (mods/cinema/install-cinema.ps1).
+name: Cinema release
+
+on:
+  push:
+    tags: ["cinema-v*"]
+
+permissions:
+  contents: write   # to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the compiler (clang, ld.lld, llvm-nm, llvm-objcopy)
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+
+      - name: Check the tag against mod.toml
+        run: |
+          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' mods/cinema/mod.toml)
+          if [ "cinema-v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag $GITHUB_REF_NAME doesn't match mods/cinema/mod.toml (version $version)"; exit 1
+          fi
+
+      - name: Build Cinema
+        run: python3 tools/kaemod.py mods/cinema --no-core --out build/cinema.zip
+
+      - name: Pack KaeGae Core and Cinema
+        run: |
+          mkdir -p pack
+          cd pack
+          unzip -q ../releases/kaegae-core.zip
+          unzip -q ../build/cinema.zip
+          zip -qr ../cinema-pack.zip 0400486024DEC000
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#cinema-v}
+          gh release create "$GITHUB_REF_NAME" cinema-pack.zip mods/cinema/install-cinema.ps1 \
+            --title "Cinema $version" \
+            --notes "Cinema $version et KaeGae Core, pour Zelda Ocarina of Time (Switch 2), jeu 1.1.1.
+
+          Installation : télécharger install-cinema.ps1 puis, dans PowerShell, émulateur fermé :
+          powershell -ExecutionPolicy Bypass -File .\\install-cinema.ps1
+
+          Ou décompresser cinema-pack.zip dans le dossier de mods de l'émulateur. Détails : mods/cinema/README.md."
