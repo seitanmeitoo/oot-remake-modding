@@ -16,7 +16,21 @@ extern const char *const SPEEDS[];
 enum {
     REQ_CAMERA = 1, REQ_RESET = 2, REQ_FREEZE = 4, REQ_SLOW = 8, REQ_HEALTH = 16, REQ_WARP = 32,
     REQ_AGE = 64, REQ_GEAR = 128, REQ_POS_SAVE = 256, REQ_POS_LOAD = 512, REQ_CARRY = 1024,
+    REQ_INV = 4096,
 };
+
+// Inventory and story changes (inventory.h), posted with cinema_inventory and done on the game's thread.
+enum {
+    INV_ITEM,      // a: index in inv_items, b: on
+    INV_GEAR,      // a: index in inv_gear, b: on
+    INV_MASK,      // b: choice (0 none)
+    INV_TRADE_CHILD, INV_TRADE_ADULT,   // b: choice
+    INV_QUEST_ITEM, INV_SONG,           // a: index, b: on
+    INV_AMMO,      // fill every count
+    INV_STAGE,     // a: quest, b: stage
+    INV_ALL_QUESTS // b: 1 every quest done, 0 none started
+};
+void cinema_inventory(int op, int a, int b);
 void cinema_request(unsigned what);
 void cinema_warp(int place, int spawn);   // indexes into places[] / spawns[] (warp.h); posts REQ_WARP
 int cinema_camera_on(void);

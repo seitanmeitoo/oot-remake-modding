@@ -4,7 +4,7 @@ manifest = 1
 
 id       = "seitanmeitoo.cinema"
 name     = "Cinema"
-version  = "0.5.0"
+version  = "0.6.0"
 authors  = ["seitanmeitoo", "PracticeROM and sloperinaGZ's contributors (warps)"]
 license  = "GPL-3.0-or-later"
 homepage = "https://github.com/seitanmeitoo/oot-remake-modding"
@@ -15,7 +15,7 @@ title = "0400486024DEC000"
 
 [core]
 api     = "0.8"
-sources = ["cinema.c", "panel.c", "warp.c", "places.c", "gamedata.c", "link.c"]
+sources = ["cinema.c", "panel.c", "warp.c", "places.c", "gamedata.c", "link.c", "inventory.c", "inventory_data.c"]
 events  = ["frame", "input", "view", "draw", "player_move"]
 
 [core.imports]                # system functions the mod imports itself, and which module exports them

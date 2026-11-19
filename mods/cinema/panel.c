@@ -11,6 +11,7 @@
 #include "cinema.h"
 #include "warp.h"
 #include "link.h"
+#include "inventory.h"
 
 typedef struct {
     int64_t  sample;
@@ -41,8 +42,9 @@ static uint32_t prev_buttons;
 static int64_t prev_sample;
 
 // What the panel shows: its page, and on the warp page the chosen category, place and spawn.
-enum { PAGE_CAMERA, PAGE_WARP, PAGE_LINK };
+enum { PAGE_CAMERA, PAGE_WARP, PAGE_LINK, PAGE_INVENTORY, PAGE_STORY };
 static int page, category, place = -1, spawn, scroll_places, scroll_spawns;
+static int inv_tab, quest = -1, scroll_quests, scroll_stages;
 #define LIST_ROWS 10
 
 // This draw's layout: scale, mouse, whether the left button went down, wheel notches (+1 up).
@@ -253,6 +255,118 @@ static void page_link(int x0, int y, int pad, int label_w, int row) {
     #undef LABEL
 }
 
+// A button in a flowing row: it goes to the next line when it doesn't fit before xmax.
+static int flow(int *x, int *y, int left, int xmax, int row, const char *label, int on) {
+    if (*x + kae_text_width(ui.k, label) + 12 * ui.k > xmax)
+        *x = left, *y += row;
+    return button(x, *y, label, on);
+}
+
+// "None" and one button per item; the one held is lit. Returns the choice clicked, or -1.
+static int one_of(int *x, int *y, int left, int xmax, int row, const pouch_one_t *items, int n) {
+    int held = inv_one_chosen(items, n), clicked = -1;
+    if (flow(x, y, left, xmax, row, "Aucun", held == 0))
+        clicked = 0;
+    for (int i = 0; i < n; i++)
+        if (flow(x, y, left, xmax, row, items[i].label, held == i + 1))
+            clicked = i + 1;
+    return clicked;
+}
+
+static void page_inventory(int x0, int y, int pad, int w, int row) {
+    static const char *const tabs[] = { "Objets", "Équipement", "Masques", "Échange", "Quête et chansons" };
+    int k = ui.k, left = x0 + pad, xmax = x0 + w - pad, x = left;
+    for (int t = 0; t < 5; t++)
+        if (button(&x, y, tabs[t], t == inv_tab))
+            inv_tab = t;
+    y += row + row / 2;
+    x = left;
+    int c;
+    switch (inv_tab) {
+    case 0:
+        for (int i = 0; i < inv_n_items; i++)
+            if (inv_items[i].kind == IK_OWNED || inv_items[i].kind == IK_ACQUIRED) {
+                int on = inv_owned(&inv_items[i]);
+                if (flow(&x, &y, left, xmax, row, inv_items[i].label, on))
+                    cinema_inventory(INV_ITEM, i, !on);
+            }
+        y += row + row / 2;
+        x = left;
+        if (button(&x, y, "Munitions au maximum", 0))
+            cinema_inventory(INV_AMMO, 0, 0);
+        break;
+    case 1:
+        for (int i = 0; i < inv_n_gear; i++)
+            if (inv_gear[i].worn_slot) {   // the ocarinas need the game's pouch: left out
+                int on = inv_owned(&inv_gear[i]);
+                if (flow(&x, &y, left, xmax, row, inv_gear[i].label, on))
+                    cinema_inventory(INV_GEAR, i, !on);
+            }
+        break;
+    case 2:
+        if ((c = one_of(&x, &y, left, xmax, row, inv_masks, inv_n_masks)) >= 0)
+            cinema_inventory(INV_MASK, 0, c);
+        break;
+    case 3:
+        kae_draw_text(left, y + 3 * k, k, C_DIM, "Enfant");
+        y += row;
+        if ((c = one_of(&x, &y, left, xmax, row, inv_trade_child, inv_n_trade_child)) >= 0)
+            cinema_inventory(INV_TRADE_CHILD, 0, c);
+        y += row + row / 2;
+        x = left;
+        kae_draw_text(left, y + 3 * k, k, C_DIM, "Adulte");
+        y += row;
+        if ((c = one_of(&x, &y, left, xmax, row, inv_trade_adult, inv_n_trade_adult)) >= 0)
+            cinema_inventory(INV_TRADE_ADULT, 0, c);
+        break;
+    default:
+        for (int i = 0; i < inv_n_quest_items; i++) {
+            int on = inv_flag(&inv_quest_items[i]);
+            if (flow(&x, &y, left, xmax, row, inv_quest_items[i].label, on))
+                cinema_inventory(INV_QUEST_ITEM, i, !on);
+        }
+        y += row + row / 2;
+        x = left;
+        for (int i = 0; i < inv_n_songs; i++) {
+            int on = inv_flag(&inv_songs[i]);
+            if (flow(&x, &y, left, xmax, row, inv_songs[i].label, on))
+                cinema_inventory(INV_SONG, i, !on);
+        }
+        break;
+    }
+}
+
+static const char *quest_label(int i) { return inv_quests[i].label; }
+static const char *stage_label(int i) { return inv_quests[quest].stages[i]; }
+
+static void page_story(int x0, int y, int pad, int w, int row) {
+    int k = ui.k, x = x0 + pad;
+    if (button(&x, y, "Tout terminer", 0))
+        cinema_inventory(INV_ALL_QUESTS, 0, 1);
+    if (button(&x, y, "Tout au début", 0))
+        cinema_inventory(INV_ALL_QUESTS, 0, 0);
+    y += row + row / 2;
+
+    int col = (w - 2 * pad - 8 * k) / 2, x2 = x0 + pad + col + 8 * k, lists_h = LIST_ROWS * 18 * k;
+    kae_draw_text(x0 + pad, y, k, C_DIM, "Quête");
+    kae_draw_text(x2, y, k, C_DIM, "Étape (nom du jeu)");
+    y += 20 * k;
+    int hit = list(x0 + pad, y, col, inv_n_quests, quest, &scroll_quests, quest_label);
+    if (hit >= 0 && hit != quest)
+        quest = hit, scroll_stages = 0;
+    if (quest >= 0) {
+        hit = list(x2, y, col, inv_quests[quest].n_stages, quest_stage(quest), &scroll_stages, stage_label);
+        if (hit >= 0)
+            cinema_inventory(INV_STAGE, quest, hit);
+    } else {
+        kae_draw_rect(x2, y, col, lists_h, C_LIST);
+        kae_draw_text(x2 + 4 * k, y + k, k, C_DIM, "Choisis une quête.");
+    }
+    y += lists_h + 8 * k;
+    kae_draw_text(x0 + pad, y + 3 * k, k, C_DIM,
+                  "Change la sauvegarde : prends-en une à part. Souvent visible\naprès un rechargement du lieu (onglet Link).");
+}
+
 static void page_warp(int x0, int y, int pad, int w, int row) {
     int k = ui.k, x = x0 + pad;
     for (int c = 0; c < PC_COUNT; c++)
@@ -310,21 +424,19 @@ void panel_draw(const KaeFrame *frame) {
     prev_sample = m.sample;
 
     int k = ui.k, row = 26 * k, pad = 10 * k, label_w = 20 * 8 * k;
-    int w = 66 * 8 * k + 2 * pad, h = 14 * row + 2 * pad;
+    int w = 70 * 8 * k + 2 * pad, h = 14 * row + 2 * pad;
     int x0 = frame->width - w - 24 * k, y0 = 24 * k, y = y0 + pad, x;
     if (x0 < 0)
         x0 = 0;
     kae_draw_rect(x0, y0, w, h, C_BACK);
 
-    // Title, the two pages, and a close button on the right.
+    // Title, the pages, and a close button on the right.
+    static const char *const pages[] = { "Caméra", "Téléportation", "Link", "Inventaire", "Histoire" };
     kae_draw_text(x0 + pad, y + 3 * k, k, C_TITLE, "Cinéma");
     x = x0 + pad + 8 * 8 * k;
-    if (button(&x, y, "Caméra et temps", page == PAGE_CAMERA))
-        page = PAGE_CAMERA;
-    if (button(&x, y, "Téléportation", page == PAGE_WARP))
-        page = PAGE_WARP;
-    if (button(&x, y, "Link", page == PAGE_LINK))
-        page = PAGE_LINK;
+    for (int p = 0; p < 5; p++)
+        if (button(&x, y, pages[p], page == p))
+            page = p;
     x = x0 + w - pad - kae_text_width(k, "Fermer") - 12 * k;
     if (button(&x, y, "Fermer", 0))
         open = 0;
@@ -338,6 +450,10 @@ void panel_draw(const KaeFrame *frame) {
         page_camera(x0, y, pad, label_w, row);
     else if (page == PAGE_LINK)
         page_link(x0, y, pad, label_w, row);
+    else if (page == PAGE_INVENTORY)
+        page_inventory(x0, y, pad, w, row);
+    else if (page == PAGE_STORY)
+        page_story(x0, y, pad, w, row);
     else
         page_warp(x0, y, pad, w, row);
 

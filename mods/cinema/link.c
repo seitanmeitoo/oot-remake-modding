@@ -10,11 +10,12 @@
 // taken off (the slot's String64, then the owner's "equip all"), from sys.c the memory regions.
 // Changed for Cinema: game 1.1.1 only (offsets as constants); gear put on as well as taken off,
 // from a list of what each age can wear; the heap search no more than once in 10 s after a miss,
-// timed on the system tick, and Core's two Link objects tried too; a scene reload when the
+// timed on the system tick, and Core's two Link objects tried too; gear put on is owned too; a scene reload when the
 // equipment isn't found; the item screen's HUD refresh left out; messages in French for the panel.
 #include "gamedata.h"
 #include "link.h"
 #include "warp.h"
+#include "inventory.h"
 
 // Game 1.1.1 (sloperinaGZ's z64hd_builds.h)
 #define VT_LINKOBJ          0x4B25E18
@@ -242,6 +243,8 @@ const char *gear_wear(int index) {
         return 0;
     if (!gd_set_str(slot_fields[gear[index].slot], gear[index].game))
         return "Impossible ici : données du jeu introuvables.";
+    if (gear[index].game[0])
+        inv_own_worn(gear[index].game);   // worn gear shows in the item screen too
     uintptr_t owner = equip_owner();
     if (!owner)
         return gear_reload_needed;   // cinema.c reloads the scene: the game puts the gear on as it loads

@@ -32,6 +32,7 @@
 #include "kmath.h"
 #include "warp.h"
 #include "link.h"
+#include "inventory.h"
 
 #define BUILD_111       "E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348"
 #define TIME_MGR_SLOT   0x4c7e890
@@ -83,6 +84,7 @@ KaeItem settings[COUNT] = {
 
 static volatile unsigned requests;   // REQ_* from the panel, done in frame
 static volatile int warp_place, warp_spawn, health_on, age_wanted, gear_wanted, carrying;
+static volatile int inv_op, inv_a, inv_b;
 static const char *link_status = "";
 
 // A saved position: where Link stood, in which scene. A load puts him back over a few movement
@@ -307,6 +309,7 @@ int cinema_frozen(void) { return c.freeze; }
 int cinema_slow(void) { return c.slow; }
 int cinema_health(void) { return health_on; }
 int cinema_carrying(void) { return carrying; }
+void cinema_inventory(int op, int a, int b) { inv_op = op, inv_a = a, inv_b = b, cinema_request(REQ_INV); }
 int cinema_has_position(void) { return pos.saved; }
 const char *cinema_link_status(void) { return link_status; }
 void cinema_age(int age) { age_wanted = age, cinema_request(REQ_AGE); }
@@ -336,6 +339,21 @@ void cinema_warp(int place, int spawn) {
         return;
     warp_place = place, warp_spawn = spawn;
     cinema_request(REQ_WARP);
+}
+
+static void do_inventory(int op, int a, int b) {   // the game's thread
+    switch (op) {
+    case INV_ITEM:        if (a >= 0 && a < inv_n_items) inv_set_owned(&inv_items[a], b); break;
+    case INV_GEAR:        if (a >= 0 && a < inv_n_gear) inv_set_owned(&inv_gear[a], b); break;
+    case INV_MASK:        inv_one_choose(inv_masks, inv_n_masks, b); break;
+    case INV_TRADE_CHILD: inv_one_choose(inv_trade_child, inv_n_trade_child, b); break;
+    case INV_TRADE_ADULT: inv_one_choose(inv_trade_adult, inv_n_trade_adult, b); break;
+    case INV_QUEST_ITEM:  if (a >= 0 && a < inv_n_quest_items) inv_set_flag(&inv_quest_items[a], b); break;
+    case INV_SONG:        if (a >= 0 && a < inv_n_songs) inv_set_flag(&inv_songs[a], b); break;
+    case INV_AMMO:        inv_fill_ammo(); break;
+    case INV_STAGE:       quest_set_stage(a, b); break;
+    case INV_ALL_QUESTS:  quests_set_all(b); break;
+    }
 }
 
 static void do_requests(void) {   // the game's thread
@@ -381,6 +399,8 @@ static void do_requests(void) {   // the game's thread
         else
             pos.loading = LOAD_UPDATES, link_status = "Position rechargée.";
     }
+    if (r & REQ_INV)
+        do_inventory(inv_op, inv_a, inv_b);
     if (r & REQ_CARRY) {
         carrying = d.on && !carrying;
         link_status = d.on ? "" : "Active d'abord la caméra libre.";
@@ -485,8 +505,8 @@ static int start(void) {
         KAE_LOG("cinema: no player_move event: Link's position can't be saved or carried");
     kae_on_draw(draw, 0, 0);
     kae_settings("Cinema", settings, COUNT);
-    KAE_LOG("cinema 0.5.0 on Core");
+    KAE_LOG("cinema 0.6.0 on Core");
     return 0;
 }
 
-KAE_MOD("seitanmeitoo.cinema", "0.5.0", start, 0);
+KAE_MOD("seitanmeitoo.cinema", "0.6.0", start, 0);

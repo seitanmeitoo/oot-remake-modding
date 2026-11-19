@@ -6,12 +6,20 @@
 // version 3 of the License, or (at your option) any later version. See LICENSE.
 //
 // From Slopped Up Sloperina 0.4.0's gamedata.c (sloperinaGZ 0.0.4.2): the type entries, the hash
-// lookup, String64 and Bool. Changed for Cinema: game 1.1.1 only (its offsets as constants, memory
-// checked with kae_readable instead of sys.c); Int, Float and Enum left out.
+// lookup, murmur3, Int, Enum, String64 and Bool. Changed for Cinema: game 1.1.1 only (its offsets as
+// constants, memory checked with kae_readable instead of sys.c); Float left out.
 #include "gamedata.h"
 
 #define GD_MGR_PTR      0x4C7E180     // 1.1.1
 #define VT_BOOL_TYPE    0x4C1F140     // 1.1.1: the Bool type entry's vtable
+#define VT_ENUM_TYPE    0x4C1F500     // 1.1.1: the Enum type entry's vtable
+#define VT_INT_FIELD    0x4C20718     // 1.1.1: an Int field object's vtable
+#define GD_SETINT       0x163B70      // 1.1.1: GameData SetInt (mgr, value, hash)
+#define GD_INT_TYPE     0xC8          // manager+: the Int type entry
+#define ENUM_STRIDE     0x38
+#define INT_STRIDE      0x28
+#define INT_VALUE       0x1C
+#define ENUM_VALUE      0x1C
 #define GD_STRING_TYPE  0x608         // manager+: the String64 type entry
 #define GD_TYPES_SCAN   0x800         // other type entries are found by vtable within manager+0..this
 #define STR_STRIDE      0x108
@@ -110,23 +118,22 @@ int gd_set_str(uint32_t hash, const char *s) {
     return 1;
 }
 
-// The Bool type entry, found by its vtable among the manager's first bytes (the offset is cached).
-static uint32_t bool_entry_off;
-
-static uint8_t *bool_value(uint32_t hash) {
+// A type entry found by its vtable among the manager's first bytes (the offset is cached), and the
+// value of field `hash` in it (its copy follows it).
+static uint8_t *typed_value(uint32_t hash, uint32_t vt, uint32_t *cached_off, uint32_t stride, uint32_t value_off) {
     uint8_t *mgr = manager();
     if (!mgr || !kae_readable(mgr, GD_TYPES_SCAN + sizeof(gd_type_t)))
         return 0;
-    uintptr_t vtable = MAIN(VT_BOOL_TYPE);
-    gd_type_t *t = bool_entry_off ? (gd_type_t *)(mgr + bool_entry_off) : 0;
+    uintptr_t vtable = MAIN(vt);
+    gd_type_t *t = *cached_off ? (gd_type_t *)(mgr + *cached_off) : 0;
     if (!t || t->vtable != vtable || !type_plausible(t)) {
         t = 0;
-        bool_entry_off = 0;
+        *cached_off = 0;
         for (uint32_t off = 0; off < GD_TYPES_SCAN; off += 8) {
             gd_type_t *c = (gd_type_t *)(mgr + off);
             if (c->vtable == vtable && type_plausible(c)) {
                 t = c;
-                bool_entry_off = off;
+                *cached_off = off;
                 break;
             }
         }
@@ -134,7 +141,79 @@ static uint8_t *bool_value(uint32_t hash) {
     if (!t)
         return 0;
     int64_t index = lookup(t, hash);
-    return index < 0 ? 0 : t->objects + (size_t)index * BOOL_STRIDE + BOOL_VALUE;
+    return index < 0 ? 0 : t->objects + (size_t)index * stride + value_off;
+}
+
+static uint32_t bool_entry_off, enum_entry_off;
+static uint8_t *bool_value(uint32_t hash) { return typed_value(hash, VT_BOOL_TYPE, &bool_entry_off, BOOL_STRIDE, BOOL_VALUE); }
+
+int gd_get_enum(uint32_t hash, uint32_t *out) {
+    uint32_t *v = (uint32_t *)typed_value(hash, VT_ENUM_TYPE, &enum_entry_off, ENUM_STRIDE, ENUM_VALUE);
+    if (v)
+        *out = v[0];
+    return v != 0;
+}
+
+int gd_set_enum(uint32_t hash, uint32_t value) {
+    uint32_t *v = (uint32_t *)typed_value(hash, VT_ENUM_TYPE, &enum_entry_off, ENUM_STRIDE, ENUM_VALUE);
+    if (v)
+        v[0] = v[1] = value;
+    return v != 0;
+}
+
+// Int: through the game's own GetInt / SetInt, once the Int fields look valid (gd_ready).
+typedef void (*setint_t)(void *mgr, int32_t value, uint32_t hash);
+
+static int int_ready(uint8_t *mgr) {
+    gd_type_t *t = (gd_type_t *)(mgr + GD_INT_TYPE);
+    return type_plausible(t) && ptr_at((uintptr_t)t->objects) == MAIN(VT_INT_FIELD);
+}
+
+// Read straight from the Int type entry (objects 0x28 bytes, value at +0x1C), not through GetInt:
+// the panel reads from Core's drawing, which isn't the game's thread.
+int gd_get_int(uint32_t hash, int32_t *out) {
+    uint8_t *mgr = manager();
+    if (!mgr || !int_ready(mgr))
+        return 0;
+    const gd_type_t *t = (const gd_type_t *)(mgr + GD_INT_TYPE);
+    int64_t index = lookup(t, hash);
+    if (index < 0)
+        return 0;
+    *out = *(const int32_t *)(t->objects + (size_t)index * INT_STRIDE + INT_VALUE);
+    return 1;
+}
+
+void gd_set_int(uint32_t hash, int32_t value) {
+    uint8_t *mgr = manager();
+    if (mgr && int_ready(mgr))
+        MAIN_FN(setint_t, GD_SETINT)(mgr, value, hash);
+}
+
+static uint32_t rotl32(uint32_t x, int r) { return (x << r) | (x >> (32 - r)); }
+
+uint32_t murmur3(const char *s) {
+    const uint32_t c1 = 0xCC9E2D51, c2 = 0x1B873593;
+    uint32_t hash = 0, len = 0;
+    while (s[len])
+        len++;
+    const uint8_t *b = (const uint8_t *)s;
+    uint32_t i;
+    for (i = 0; i + 4 <= len; i += 4) {
+        uint32_t block = b[i] | b[i + 1] << 8 | b[i + 2] << 16 | (uint32_t)b[i + 3] << 24;
+        block = rotl32(block * c1, 15) * c2;
+        hash = rotl32(hash ^ block, 13) * 5 + 0xE6546B64;
+    }
+    uint32_t tail = 0;
+    switch (len & 3) {
+    case 3: tail ^= b[i + 2] << 16; // fall through
+    case 2: tail ^= b[i + 1] << 8;  // fall through
+    case 1: tail ^= b[i];
+            hash ^= rotl32(tail * c1, 15) * c2;
+    }
+    hash ^= len;
+    hash = (hash ^ (hash >> 16)) * 0x85EBCA6B;
+    hash = (hash ^ (hash >> 13)) * 0xC2B2AE35;
+    return hash ^ (hash >> 16);
 }
 
 int gd_get_bool(uint32_t hash, int *out) {

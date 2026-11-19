@@ -28,3 +28,8 @@ const char *gd_get_str(uint32_t hash);      // null if not found
 int gd_set_str(uint32_t hash, const char *s);
 int gd_get_bool(uint32_t hash, int *out);
 int gd_set_bool(uint32_t hash, int value);
+int gd_get_int(uint32_t hash, int32_t *out);   // read from the Int entry (any thread)
+void gd_set_int(uint32_t hash, int32_t value); // through the game's SetInt (applied at its next flush)
+int gd_get_enum(uint32_t hash, uint32_t *out); // value = murmur3(choice)
+int gd_set_enum(uint32_t hash, uint32_t value);
+uint32_t murmur3(const char *s);               // MurmurHash3_x86_32, seed 0: GameData's field hash
